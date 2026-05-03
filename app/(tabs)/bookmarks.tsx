@@ -1,48 +1,76 @@
-import { FlashList } from '@shopify/flash-list';
-import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActionSheetIOS,
   Alert,
-  Pressable,
-  SafeAreaView,
+  FlatList,
+  Platform,
   StyleSheet,
-  useColorScheme,
+  Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
-import { Text } from '../../components/ui/text';
-import { Bookmark, clearAllBookmarks, getAllBookmarks, removeBookmark } from '../../lib/database';
-
-function timeAgo(ts: number): string {
-  const diff = Date.now() - ts;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
+import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useThemeColor } from '@/hooks/useThemeColor';
+import { Bookmark, clearAllBookmarks, getAllBookmarks, removeBookmark } from '@/lib/database';
+import { exportBookmarks, importBookmarks, shareBookmark } from '@/lib/exportImport';
 
 export default function BookmarksScreen() {
-  const isDark = useColorScheme() === 'dark';
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+
+  const bg = useThemeColor({}, 'background');
+  const textColor = useThemeColor({}, 'text');
+  const borderColor = useThemeColor({}, 'icon');
+  const cardBg = useThemeColor({ light: '#f9fafb', dark: '#1c1c1e' }, 'background');
+
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
 
   const load = useCallback(async () => {
-    const data = await getAllBookmarks();
-    setBookmarks(data);
+    setBookmarks(await getAllBookmarks());
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const handleDelete = async (url: string) => {
-    await removeBookmark(url);
-    await load();
-  };
+  const handleDelete = useCallback(
+    async (bm: Bookmark) => {
+      await removeBookmark(bm.url);
+      await load();
+    },
+    [load],
+  );
 
-  const handleClearAll = () => {
-    Alert.alert('Clear Bookmarks', 'Remove all bookmarks?', [
+  const handleLongPress = useCallback(
+    (bm: Bookmark) => {
+      const options = ['📋 Copy URL', '📄 Share as Markdown', '📦 Share as JSON', '🗑 Delete', 'Cancel'];
+      if (Platform.OS === 'ios') {
+        ActionSheetIOS.showActionSheetWithOptions(
+          { options, cancelButtonIndex: 4, destructiveButtonIndex: 3 },
+          async (idx) => {
+            if (idx === 0) await shareBookmark(bm, 'url');
+            else if (idx === 1) await shareBookmark(bm, 'markdown');
+            else if (idx === 2) await shareBookmark(bm, 'json');
+            else if (idx === 3) await handleDelete(bm);
+          },
+        );
+      } else {
+        Alert.alert(bm.title, bm.url, [
+          { text: '📋 Copy URL', onPress: () => shareBookmark(bm, 'url') },
+          { text: '📄 Share as Markdown', onPress: () => shareBookmark(bm, 'markdown') },
+          { text: '📦 Share as JSON', onPress: () => shareBookmark(bm, 'json') },
+          { text: '🗑 Delete', style: 'destructive', onPress: () => handleDelete(bm) },
+          { text: 'Cancel', style: 'cancel' },
+        ]);
+      }
+    },
+    [handleDelete],
+  );
+
+  const handleClearAll = useCallback(() => {
+    Alert.alert('Clear Bookmarks', 'Remove all bookmarks? This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Clear All',
@@ -53,70 +81,126 @@ export default function BookmarksScreen() {
         },
       },
     ]);
-  };
+  }, [load]);
 
-  const bg = isDark ? '#0a0a0a' : '#f1f5f9';
-  const cardBg = isDark ? '#1a1a1a' : '#ffffff';
-  const textColor = isDark ? '#f1f5f9' : '#0f172a';
-  const subColor = isDark ? '#94a3b8' : '#64748b';
+  const handleExport = useCallback((format: 'json' | 'markdown') => {
+    exportBookmarks(format).catch((e) => Alert.alert('Export failed', String(e)));
+  }, []);
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: bg }]}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: textColor }]}>⭐ Bookmarks</Text>
-        {bookmarks.length > 0 && (
-          <Pressable onPress={handleClearAll}>
-            <Text style={{ color: '#ef4444', fontSize: 13, fontWeight: '600' }}>Clear all</Text>
-          </Pressable>
-        )}
-      </View>
+  const handleImport = useCallback(async () => {
+    const result = await importBookmarks();
+    await load();
+    Alert.alert(
+      'Import complete',
+      `Imported: ${result.imported}\nSkipped: ${result.skipped}${result.errors ? `\nErrors: ${result.errors}` : ''}`,
+    );
+  }, [load]);
 
-      <FlashList
-        data={bookmarks}
-        estimatedItemSize={72}
-        onRefresh={load}
-        refreshing={false}
-        contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 24 }}
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() =>
-              router.push({
-                pathname: '/browser/[sourceId]',
-                params: { sourceId: item.sourceId, url: item.url },
-              })
-            }
-            style={[styles.card, { backgroundColor: cardBg }]}
-          >
-            <View style={styles.cardMain}>
-              <Text style={[styles.cardTitle, { color: textColor }]} numberOfLines={1}>
-                {item.title || item.url}
-              </Text>
-              <Text style={[styles.cardUrl, { color: subColor }]} numberOfLines={1}>
-                {item.url}
-              </Text>
-              <Text style={[styles.cardTime, { color: subColor }]}>{timeAgo(item.createdAt)}</Text>
-            </View>
-            <Pressable
-              onPress={() => handleDelete(item.url)}
-              style={styles.deleteBtn}
-              hitSlop={12}
-            >
-              <Text style={{ fontSize: 16 }}>🗑️</Text>
-            </Pressable>
-          </Pressable>
-        )}
-        keyExtractor={(item) => item.url}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={{ fontSize: 48 }}>⭐</Text>
-            <Text style={[styles.emptyText, { color: subColor }]}>No bookmarks yet</Text>
-            <Text style={{ color: subColor, fontSize: 12, marginTop: 4 }}>
-              Tap the star in the browser to save pages
+  const handleExportMenu = useCallback(() => {
+    const opts = ['📄 Export as Markdown', '📦 Export as JSON', '📥 Import from JSON', 'Cancel'];
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: opts, cancelButtonIndex: 3 },
+        (idx) => {
+          if (idx === 0) handleExport('markdown');
+          else if (idx === 1) handleExport('json');
+          else if (idx === 2) handleImport();
+        },
+      );
+    } else {
+      Alert.alert('Bookmarks', undefined, [
+        { text: '📄 Export Markdown', onPress: () => handleExport('markdown') },
+        { text: '📦 Export JSON', onPress: () => handleExport('json') },
+        { text: '📥 Import JSON', onPress: handleImport },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    }
+  }, [handleExport, handleImport]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: Bookmark }) => (
+      <TouchableOpacity
+        style={[styles.card, { backgroundColor: cardBg, borderColor }]}
+        onPress={() => router.push(`/browser/${item.sourceId || 'mdn'}?url=${encodeURIComponent(item.url)}`)}
+        onLongPress={() => handleLongPress(item)}
+        activeOpacity={0.75}
+      >
+        <View style={styles.cardContent}>
+          <View style={styles.cardHeader}>
+            {item.cachedPath && (
+              <Ionicons name="cloud-done-outline" size={13} color="#10b981" style={{ marginRight: 4 }} />
+            )}
+            <Text style={[styles.cardTitle, { color: textColor }]} numberOfLines={2}>
+              {item.title}
             </Text>
           </View>
+          <Text style={[styles.cardUrl, { color: borderColor }]} numberOfLines={1}>
+            {item.url}
+          </Text>
+          <Text style={[styles.cardDate, { color: borderColor }]}>
+            {new Date(item.createdAt).toLocaleDateString()}
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={styles.deleteBtn}
+          onPress={() => handleDelete(item)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="trash-outline" size={18} color="#ef4444" />
+        </TouchableOpacity>
+      </TouchableOpacity>
+    ),
+    [textColor, borderColor, cardBg, router, handleDelete, handleLongPress],
+  );
+
+  return (
+    <View style={[styles.container, { backgroundColor: bg }]}>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: borderColor }]}>
+        <Text style={[styles.title, { color: textColor }]}>
+          Bookmarks {bookmarks.length > 0 ? `(${bookmarks.length})` : ''}
+        </Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.headerBtn}
+            onPress={handleExportMenu}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="share-outline" size={22} color="#6366f1" />
+          </TouchableOpacity>
+          {bookmarks.length > 0 && (
+            <TouchableOpacity
+              style={styles.headerBtn}
+              onPress={handleClearAll}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="trash-outline" size={22} color="#ef4444" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      <FlatList
+        data={bookmarks}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderItem}
+        contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 16 }]}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Ionicons name="star-outline" size={48} color={borderColor} />
+            <Text style={[styles.emptyTitle, { color: textColor }]}>No bookmarks yet</Text>
+            <Text style={[styles.emptyText, { color: borderColor }]}>
+              Tap the ⭐ in the browser toolbar to save pages.
+            </Text>
+            <TouchableOpacity style={styles.importBtn} onPress={handleImport}>
+              <Ionicons name="download-outline" size={18} color="#6366f1" />
+              <Text style={{ color: '#6366f1', fontWeight: '600' }}>Import Bookmarks</Text>
+            </TouchableOpacity>
+          </View>
         }
+        showsVerticalScrollIndicator={false}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -127,24 +211,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 16,
     paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  title: { fontSize: 22, fontWeight: '800' },
+  title: { fontSize: 22, fontWeight: '700' },
+  headerActions: { flexDirection: 'row', gap: 4 },
+  headerBtn: { padding: 6 },
+  list: { paddingHorizontal: 12, paddingTop: 8 },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 12,
     marginBottom: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 8,
+    gap: 10,
   },
-  cardMain: { flex: 1 },
-  cardTitle: { fontSize: 14, fontWeight: '600' },
-  cardUrl: { fontSize: 11, marginTop: 2 },
-  cardTime: { fontSize: 10, marginTop: 4 },
+  cardContent: { flex: 1, gap: 3 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center' },
+  cardTitle: { fontSize: 15, fontWeight: '600', flex: 1 },
+  cardUrl: { fontSize: 12 },
+  cardDate: { fontSize: 11 },
   deleteBtn: { padding: 4 },
-  empty: { alignItems: 'center', marginTop: 80 },
-  emptyText: { fontSize: 16, fontWeight: '600', marginTop: 12 },
+  emptyContainer: {
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 80,
+    paddingHorizontal: 32,
+  },
+  emptyTitle: { fontSize: 18, fontWeight: '600' },
+  emptyText: { fontSize: 14, textAlign: 'center' },
+  importBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#6366f1',
+  },
 });

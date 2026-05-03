@@ -1,206 +1,510 @@
-import { FlashList } from '@shopify/flash-list';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActionSheetIOS,
+  Alert,
+  FlatList,
+  Modal,
+  Platform,
   Pressable,
-  SafeAreaView,
-  StatusBar,
+  ScrollView,
   StyleSheet,
+  Text,
   TextInput,
-  useColorScheme,
+  TouchableOpacity,
   View,
 } from 'react-native';
-import { Text } from '../../components/ui/text';
+import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useThemeColor } from '@/hooks/useThemeColor';
+import { DOC_SOURCES, DocSource, getAllSources, setCustomSources } from '@/lib/sources';
 import {
-  CATEGORIES,
-  DOC_SOURCES,
-  DocSource,
-  getSourcesByCategory,
-  searchSources,
-} from '../../lib/sources';
+  addCustomSource,
+  deleteCustomSource,
+  getAllCustomSources,
+  getAllSourcePrefs,
+  setSourcePref,
+  SourcePref,
+} from '@/lib/database';
 
-function SourceCard({ source, onPress }: { source: DocSource; onPress: () => void }) {
-  const isDark = useColorScheme() === 'dark';
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.card,
-        { backgroundColor: isDark ? '#1a1a1a' : '#f8fafc', opacity: pressed ? 0.7 : 1 },
-      ]}
-    >
-      <View style={[styles.cardAccent, { backgroundColor: source.color }]} />
-      <View style={styles.cardBody}>
-        <Text style={styles.cardIcon}>{source.icon}</Text>
-        <View style={styles.cardText}>
-          <Text style={[styles.cardName, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>
-            {source.name}
-          </Text>
-          <Text style={[styles.cardDesc, { color: isDark ? '#94a3b8' : '#64748b' }]} numberOfLines={1}>
-            {source.description}
-          </Text>
-        </View>
-        <View style={[styles.cardBadge, { backgroundColor: source.color + '22' }]}>
-          <Text style={[styles.cardBadgeText, { color: source.color }]}>{source.category}</Text>
-        </View>
-      </View>
-    </Pressable>
-  );
-}
+const EMOJI_PRESETS = ['📚', '🔗', '⚡', '🎨', '🛠️', '🌐', '🔧', '💡', '📖', '🚀', '🔬', '🗂️'];
+const COLOR_PRESETS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#06b6d4', '#84cc16'];
 
 export default function BrowseScreen() {
-  const isDark = useColorScheme() === 'dark';
   const router = useRouter();
-  const [query, setQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
 
-  const filtered =
-    query.length > 0
-      ? searchSources(query)
-      : selectedCategory
-        ? getSourcesByCategory(selectedCategory)
-        : DOC_SOURCES;
+  const bg = useThemeColor({}, 'background');
+  const textColor = useThemeColor({}, 'text');
+  const borderColor = useThemeColor({}, 'icon');
+  const cardBg = useThemeColor({ light: '#f9fafb', dark: '#1c1c1e' }, 'background');
 
-  const bg = isDark ? '#0a0a0a' : '#f1f5f9';
-  const inputBg = isDark ? '#1a1a1a' : '#ffffff';
-  const inputBorder = isDark ? '#2d2d2d' : '#e2e8f0';
-  const textColor = isDark ? '#f1f5f9' : '#0f172a';
+  const [search, setSearch] = useState('');
+  const [activeCategory, setActiveCategory] = useState('All');
+  const [prefs, setPrefs] = useState<Record<string, SourcePref>>({});
+  const [showHidden, setShowHidden] = useState(false);
+  const [addModalVisible, setAddModalVisible] = useState(false);
+
+  // Add custom source form
+  const [formUrl, setFormUrl] = useState('');
+  const [formName, setFormName] = useState('');
+  const [formIcon, setFormIcon] = useState('🔗');
+  const [formColor, setFormColor] = useState('#6366f1');
+  const [formCategory, setFormCategory] = useState('Custom');
+  const [formDesc, setFormDesc] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const loadData = useCallback(async () => {
+    const [customs, loadedPrefs] = await Promise.all([getAllCustomSources(), getAllSourcePrefs()]);
+    setCustomSources(
+      customs.map((c) => ({
+        id: c.id,
+        name: c.name,
+        url: c.url,
+        icon: c.icon,
+        color: c.color,
+        category: c.category,
+        description: c.description,
+      })),
+    );
+    setPrefs(loadedPrefs);
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const allSources = getAllSources();
+  const categories = useMemo(() => ['All', ...new Set(allSources.map((s) => s.category))], [prefs]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    let sources = allSources.filter((s) => {
+      const pref = prefs[s.id];
+      if (!showHidden && pref?.hidden) return false;
+      if (activeCategory !== 'All' && s.category !== activeCategory) return false;
+      if (q) {
+        return (
+          s.name.toLowerCase().includes(q) ||
+          s.description.toLowerCase().includes(q) ||
+          s.category.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+    // Pinned to top
+    sources.sort((a, b) => {
+      const ap = prefs[a.id]?.pinned ? 1 : 0;
+      const bp = prefs[b.id]?.pinned ? 1 : 0;
+      return bp - ap;
+    });
+    return sources;
+  }, [allSources, prefs, search, activeCategory, showHidden]);
+
+  const handleLongPress = useCallback(
+    (source: DocSource) => {
+      const pref = prefs[source.id];
+      const isPinned = !!pref?.pinned;
+      const isHidden = !!pref?.hidden;
+      const isCustom = !DOC_SOURCES.find((s) => s.id === source.id);
+
+      const options = [
+        isPinned ? '📌 Unpin' : '📌 Pin to top',
+        isHidden ? '👁 Show' : '🙈 Hide',
+        ...(isCustom ? ['🗑 Delete source'] : []),
+        'Cancel',
+      ];
+
+      if (Platform.OS === 'ios') {
+        ActionSheetIOS.showActionSheetWithOptions(
+          { options, cancelButtonIndex: options.length - 1, destructiveButtonIndex: isCustom ? 2 : undefined },
+          async (idx) => {
+            if (idx === 0) {
+              await setSourcePref(source.id, !isPinned, isHidden);
+              await loadData();
+            } else if (idx === 1) {
+              await setSourcePref(source.id, isPinned, !isHidden);
+              await loadData();
+            } else if (idx === 2 && isCustom) {
+              Alert.alert('Delete Source', `Remove "${source.name}"?`, [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: async () => {
+                    await deleteCustomSource(source.id);
+                    await loadData();
+                  },
+                },
+              ]);
+            }
+          },
+        );
+      } else {
+        Alert.alert(source.name, undefined, [
+          {
+            text: isPinned ? '📌 Unpin' : '📌 Pin to top',
+            onPress: async () => {
+              await setSourcePref(source.id, !isPinned, isHidden);
+              await loadData();
+            },
+          },
+          {
+            text: isHidden ? '👁 Show' : '🙈 Hide',
+            onPress: async () => {
+              await setSourcePref(source.id, isPinned, !isHidden);
+              await loadData();
+            },
+          },
+          ...(isCustom
+            ? [
+                {
+                  text: '🗑 Delete source',
+                  style: 'destructive' as const,
+                  onPress: async () => {
+                    await deleteCustomSource(source.id);
+                    await loadData();
+                  },
+                },
+              ]
+            : []),
+          { text: 'Cancel', style: 'cancel' as const },
+        ]);
+      }
+    },
+    [prefs, loadData],
+  );
+
+  const handleAddSource = useCallback(async () => {
+    if (!formUrl.trim() || !formName.trim()) {
+      Alert.alert('Error', 'URL and name are required.');
+      return;
+    }
+    setSaving(true);
+    try {
+      let url = formUrl.trim();
+      if (!url.startsWith('http')) url = 'https://' + url;
+      const id = 'custom_' + Date.now();
+      await addCustomSource({
+        id,
+        name: formName.trim(),
+        url,
+        icon: formIcon,
+        color: formColor,
+        category: formCategory.trim() || 'Custom',
+        description: formDesc.trim(),
+      });
+      await loadData();
+      setAddModalVisible(false);
+      setFormUrl('');
+      setFormName('');
+      setFormIcon('🔗');
+      setFormColor('#6366f1');
+      setFormCategory('Custom');
+      setFormDesc('');
+    } finally {
+      setSaving(false);
+    }
+  }, [formUrl, formName, formIcon, formColor, formCategory, formDesc, loadData]);
+
+  const renderSource = useCallback(
+    ({ item }: { item: DocSource }) => {
+      const pref = prefs[item.id];
+      const isPinned = !!pref?.pinned;
+      const isHidden = !!pref?.hidden;
+
+      return (
+        <TouchableOpacity
+          style={[styles.sourceCard, { backgroundColor: cardBg, borderColor, opacity: isHidden ? 0.45 : 1 }]}
+          onPress={() => router.push(`/browser/${item.id}`)}
+          onLongPress={() => handleLongPress(item)}
+          activeOpacity={0.75}
+        >
+          <View style={[styles.iconBadge, { backgroundColor: item.color + '22' }]}>
+            <Text style={styles.iconText}>{item.icon}</Text>
+          </View>
+          <View style={styles.sourceInfo}>
+            <View style={styles.sourceNameRow}>
+              <Text style={[styles.sourceName, { color: textColor }]} numberOfLines={1}>
+                {item.name}
+              </Text>
+              {isPinned && <Ionicons name="pin" size={12} color={item.color} style={{ marginLeft: 4 }} />}
+            </View>
+            <Text style={[styles.sourceDesc, { color: borderColor }]} numberOfLines={1}>
+              {item.description}
+            </Text>
+            <View style={[styles.categoryBadge, { backgroundColor: item.color + '22' }]}>
+              <Text style={[styles.categoryText, { color: item.color }]}>{item.category}</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={borderColor} />
+        </TouchableOpacity>
+      );
+    },
+    [prefs, textColor, borderColor, cardBg, router, handleLongPress],
+  );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: bg }]}>
-      <StatusBar
-        barStyle={isDark ? 'light-content' : 'dark-content'}
-        backgroundColor={bg}
-      />
-
+    <View style={[styles.container, { backgroundColor: bg }]}>
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={[styles.headerTitle, { color: textColor }]}>📚 DocVault</Text>
-        <Text style={[styles.headerSub, { color: isDark ? '#94a3b8' : '#64748b' }]}>
-          {DOC_SOURCES.length} documentation sources
-        </Text>
+      <View style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: borderColor }]}>
+        <Text style={[styles.title, { color: textColor }]}>Documentation</Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            onPress={() => setShowHidden((v) => !v)}
+            style={styles.headerBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name={showHidden ? 'eye' : 'eye-off-outline'} size={22} color={borderColor} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setAddModalVisible(true)}
+            style={styles.headerBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="add-circle-outline" size={26} color="#6366f1" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Search */}
-      <View style={[styles.searchBox, { backgroundColor: inputBg, borderColor: inputBorder }]}>
-        <Text style={styles.searchIcon}>🔍</Text>
+      <View style={[styles.searchBar, { borderColor }]}>
+        <Ionicons name="search-outline" size={18} color={borderColor} />
         <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search docs..."
-          placeholderTextColor={isDark ? '#4b5563' : '#9ca3af'}
           style={[styles.searchInput, { color: textColor }]}
+          placeholder="Search docs…"
+          placeholderTextColor={borderColor}
+          value={search}
+          onChangeText={setSearch}
+          returnKeyType="search"
         />
-        {query.length > 0 && (
-          <Pressable onPress={() => setQuery('')}>
-            <Text style={{ fontSize: 18, color: isDark ? '#9ca3af' : '#6b7280' }}>✕</Text>
-          </Pressable>
+        {search.length > 0 && (
+          <TouchableOpacity onPress={() => setSearch('')}>
+            <Ionicons name="close-circle" size={18} color={borderColor} />
+          </TouchableOpacity>
         )}
       </View>
 
       {/* Category chips */}
-      <FlashList
-        data={['All', ...CATEGORIES]}
+      <ScrollView
         horizontal
-        estimatedItemSize={80}
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 6 }}
-        renderItem={({ item }) => {
-          const active = item === 'All' ? selectedCategory === null : selectedCategory === item;
-          return (
-            <Pressable
-              onPress={() => setSelectedCategory(item === 'All' ? null : item)}
+        contentContainerStyle={styles.categoryRow}
+        keyboardShouldPersistTaps="handled"
+      >
+        {categories.map((cat) => (
+          <TouchableOpacity
+            key={cat}
+            style={[
+              styles.chip,
+              activeCategory === cat && styles.chipActive,
+              { borderColor },
+              activeCategory === cat && { borderColor: '#6366f1', backgroundColor: '#6366f122' },
+            ]}
+            onPress={() => setActiveCategory(cat)}
+          >
+            <Text
               style={[
-                styles.chip,
-                {
-                  backgroundColor: active ? '#2563eb' : isDark ? '#1a1a1a' : '#ffffff',
-                  borderColor: active ? '#2563eb' : inputBorder,
-                },
+                styles.chipText,
+                { color: activeCategory === cat ? '#6366f1' : textColor },
               ]}
             >
-              <Text style={[styles.chipText, { color: active ? '#fff' : isDark ? '#94a3b8' : '#64748b' }]}>
-                {item}
-              </Text>
-            </Pressable>
-          );
-        }}
-        keyExtractor={(item) => item}
-      />
+              {cat}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
 
       {/* Source list */}
-      <FlashList
+      <FlatList
         data={filtered}
-        estimatedItemSize={72}
-        contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 24 }}
-        renderItem={({ item }) => (
-          <SourceCard
-            source={item}
-            onPress={() =>
-              router.push({
-                pathname: '/browser/[sourceId]',
-                params: { sourceId: item.id, url: item.url },
-              })
-            }
-          />
-        )}
         keyExtractor={(item) => item.id}
+        renderItem={renderSource}
+        contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 16 }]}
         ListEmptyComponent={
-          <View style={{ alignItems: 'center', marginTop: 60 }}>
-            <Text style={{ fontSize: 40 }}>🔍</Text>
-            <Text style={{ color: isDark ? '#64748b' : '#94a3b8', marginTop: 8 }}>No results found</Text>
-          </View>
+          <Text style={[styles.emptyText, { color: borderColor }]}>No sources found</Text>
         }
+        showsVerticalScrollIndicator={false}
       />
-    </SafeAreaView>
+
+      {/* Add Source Modal */}
+      <Modal
+        visible={addModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setAddModalVisible(false)}
+      >
+        <View style={[styles.modal, { backgroundColor: bg }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: borderColor }]}>
+            <TouchableOpacity onPress={() => setAddModalVisible(false)}>
+              <Text style={{ color: '#ef4444', fontSize: 16 }}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={[styles.modalTitle, { color: textColor }]}>Add Source</Text>
+            <TouchableOpacity onPress={handleAddSource} disabled={saving}>
+              <Text style={{ color: '#6366f1', fontSize: 16, fontWeight: '600' }}>
+                {saving ? 'Adding…' : 'Add'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalBody}>
+            <Text style={[styles.fieldLabel, { color: borderColor }]}>URL *</Text>
+            <TextInput
+              style={[styles.fieldInput, { color: textColor, borderColor }]}
+              value={formUrl}
+              onChangeText={setFormUrl}
+              placeholder="https://docs.example.com"
+              placeholderTextColor={borderColor}
+              keyboardType="url"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Text style={[styles.fieldLabel, { color: borderColor }]}>Name *</Text>
+            <TextInput
+              style={[styles.fieldInput, { color: textColor, borderColor }]}
+              value={formName}
+              onChangeText={setFormName}
+              placeholder="Documentation name"
+              placeholderTextColor={borderColor}
+            />
+            <Text style={[styles.fieldLabel, { color: borderColor }]}>Description</Text>
+            <TextInput
+              style={[styles.fieldInput, { color: textColor, borderColor }]}
+              value={formDesc}
+              onChangeText={setFormDesc}
+              placeholder="Short description"
+              placeholderTextColor={borderColor}
+            />
+            <Text style={[styles.fieldLabel, { color: borderColor }]}>Category</Text>
+            <TextInput
+              style={[styles.fieldInput, { color: textColor, borderColor }]}
+              value={formCategory}
+              onChangeText={setFormCategory}
+              placeholder="Custom"
+              placeholderTextColor={borderColor}
+            />
+            <Text style={[styles.fieldLabel, { color: borderColor }]}>Icon</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+              {EMOJI_PRESETS.map((e) => (
+                <TouchableOpacity
+                  key={e}
+                  style={[styles.emojiBtn, formIcon === e && { borderColor: '#6366f1', borderWidth: 2 }]}
+                  onPress={() => setFormIcon(e)}
+                >
+                  <Text style={{ fontSize: 24 }}>{e}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <Text style={[styles.fieldLabel, { color: borderColor }]}>Color</Text>
+            <View style={styles.colorRow}>
+              {COLOR_PRESETS.map((c) => (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.colorSwatch, { backgroundColor: c }, formColor === c && styles.colorActive]}
+                  onPress={() => setFormColor(c)}
+                />
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
-  headerTitle: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
-  headerSub: { fontSize: 12, marginTop: 2 },
-  searchBox: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 12,
-    marginVertical: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  title: { fontSize: 24, fontWeight: '700' },
+  headerActions: { flexDirection: 'row', gap: 4, alignItems: 'center' },
+  headerBtn: { padding: 4 },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderRadius: 12,
     borderWidth: 1,
+    margin: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     gap: 8,
   },
-  searchIcon: { fontSize: 16 },
   searchInput: { flex: 1, fontSize: 15 },
+  categoryRow: { paddingHorizontal: 12, gap: 8, paddingBottom: 8, flexDirection: 'row' },
   chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 20,
     borderWidth: 1,
-    marginRight: 8,
   },
-  chipText: { fontSize: 12, fontWeight: '600' },
-  card: {
-    flexDirection: 'row',
-    borderRadius: 12,
-    marginBottom: 8,
-    overflow: 'hidden',
-    minHeight: 66,
-  },
-  cardAccent: { width: 4 },
-  cardBody: {
-    flex: 1,
+  chipActive: {},
+  chipText: { fontSize: 13, fontWeight: '500' },
+  list: { paddingHorizontal: 12, paddingTop: 8 },
+  sourceCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    gap: 10,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 12,
+    marginBottom: 8,
+    gap: 12,
   },
-  cardIcon: { fontSize: 26 },
-  cardText: { flex: 1 },
-  cardName: { fontSize: 14, fontWeight: '700' },
-  cardDesc: { fontSize: 12, marginTop: 2 },
-  cardBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  cardBadgeText: { fontSize: 10, fontWeight: '600' },
+  iconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconText: { fontSize: 22 },
+  sourceInfo: { flex: 1, gap: 2 },
+  sourceNameRow: { flexDirection: 'row', alignItems: 'center' },
+  sourceName: { fontSize: 15, fontWeight: '600', flex: 1 },
+  sourceDesc: { fontSize: 12 },
+  categoryBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginTop: 2,
+  },
+  categoryText: { fontSize: 11, fontWeight: '600' },
+  emptyText: { textAlign: 'center', marginTop: 60, fontSize: 15 },
+  // Modal
+  modal: { flex: 1 },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  modalTitle: { fontSize: 17, fontWeight: '600' },
+  modalBody: { padding: 16, gap: 4 },
+  fieldLabel: { fontSize: 12, fontWeight: '600', marginBottom: 4, marginTop: 12 },
+  fieldInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+  },
+  emojiBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  colorRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
+  colorSwatch: { width: 32, height: 32, borderRadius: 16 },
+  colorActive: { borderWidth: 3, borderColor: '#fff' },
 });

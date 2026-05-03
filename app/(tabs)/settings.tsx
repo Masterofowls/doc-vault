@@ -1,52 +1,61 @@
-import { Pressable, SafeAreaView, ScrollView, StyleSheet, Switch, useColorScheme, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../../components/ui/text';
 import { useBrowserStore } from '../../store/browserStore';
 import { clearHistory } from '../../lib/database';
-import { useState } from 'react';
+import { clearAllCache, getCacheStats } from '../../lib/offline';
+import { exportBookmarks, importBookmarks } from '../../lib/exportImport';
+import { useThemeColor } from '@/hooks/useThemeColor';
 
-function SettingRow({
-  icon,
-  label,
-  description,
-  right,
-}: {
+interface SettingRowProps {
   icon: string;
   label: string;
   description?: string;
   right?: React.ReactNode;
-}) {
-  const isDark = useColorScheme() === 'dark';
+  onPress?: () => void;
+}
+function SettingRow({ icon, label, description, right, onPress }: SettingRowProps) {
+  const textColor = useThemeColor({}, 'text');
+  const subColor = useThemeColor({}, 'icon');
+  const cardBg = useThemeColor({ light: '#ffffff', dark: '#1a1a1a' }, 'background');
+
   return (
-    <View
-      style={[
-        styles.row,
-        { backgroundColor: isDark ? '#1a1a1a' : '#ffffff' },
-      ]}
+    <Pressable
+      style={[styles.row, { backgroundColor: cardBg }]}
+      onPress={onPress}
+      android_ripple={onPress ? { color: '#88888822' } : undefined}
     >
       <Text style={styles.rowIcon}>{icon}</Text>
       <View style={{ flex: 1 }}>
-        <Text style={{ color: isDark ? '#f1f5f9' : '#0f172a', fontSize: 14, fontWeight: '600' }}>
-          {label}
-        </Text>
+        <Text style={{ color: textColor, fontSize: 14, fontWeight: '600' }}>{label}</Text>
         {description && (
-          <Text style={{ color: isDark ? '#64748b' : '#94a3b8', fontSize: 12, marginTop: 2 }}>
-            {description}
-          </Text>
+          <Text style={{ color: subColor, fontSize: 12, marginTop: 2 }}>{description}</Text>
         )}
       </View>
       {right}
-    </View>
+    </Pressable>
   );
 }
 
 export default function SettingsScreen() {
-  const isDark = useColorScheme() === 'dark';
+  const insets = useSafeAreaInsets();
   const { adBlockEnabled, darkModeInjection, toggleAdBlock, toggleDarkMode } = useBrowserStore();
-  const [historyCleared, setHistoryCleared] = useState(false);
 
-  const bg = isDark ? '#0a0a0a' : '#f1f5f9';
-  const textColor = isDark ? '#f1f5f9' : '#0f172a';
-  const subColor = isDark ? '#94a3b8' : '#64748b';
+  const bg = useThemeColor({}, 'background');
+  const textColor = useThemeColor({}, 'text');
+  const subColor = useThemeColor({}, 'icon');
+
+  const [historyCleared, setHistoryCleared] = useState(false);
+  const [cacheStats, setCacheStats] = useState({ count: 0, sizeMb: 0 });
+
+  const loadStats = useCallback(async () => {
+    setCacheStats(await getCacheStats());
+  }, []);
+
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
 
   const handleClearHistory = async () => {
     await clearHistory();
@@ -54,12 +63,39 @@ export default function SettingsScreen() {
     setTimeout(() => setHistoryCleared(false), 2000);
   };
 
+  const handleClearCache = useCallback(() => {
+    Alert.alert('Clear Offline Cache', `Remove ${cacheStats.count} cached pages (${cacheStats.sizeMb} MB)?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: async () => {
+          await clearAllCache();
+          loadStats();
+          Alert.alert('Done', 'Offline cache cleared.');
+        },
+      },
+    ]);
+  }, [cacheStats, loadStats]);
+
+  const handleExport = useCallback((format: 'json' | 'markdown') => {
+    exportBookmarks(format).catch((e) => Alert.alert('Export failed', String(e)));
+  }, []);
+
+  const handleImport = useCallback(async () => {
+    const result = await importBookmarks();
+    Alert.alert(
+      'Import complete',
+      `Imported: ${result.imported}\nSkipped: ${result.skipped}${result.errors ? `\nErrors: ${result.errors}` : ''}`,
+    );
+  }, []);
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: bg }]}>
-      <View style={styles.header}>
+    <View style={[styles.container, { backgroundColor: bg }]}>
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Text style={[styles.title, { color: textColor }]}>⚙️ Settings</Text>
       </View>
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}>
 
         <Text style={[styles.section, { color: subColor }]}>BROWSING</Text>
         <SettingRow
@@ -75,39 +111,68 @@ export default function SettingsScreen() {
           right={<Switch value={darkModeInjection} onValueChange={toggleDarkMode} />}
         />
 
+        <Text style={[styles.section, { color: subColor }]}>BOOKMARKS</Text>
+        <SettingRow
+          icon="📄"
+          label="Export as Markdown"
+          description="Share all bookmarks as .md"
+          onPress={() => handleExport('markdown')}
+          right={<Text style={styles.arrow}>›</Text>}
+        />
+        <SettingRow
+          icon="📦"
+          label="Export as JSON"
+          description="Share all bookmarks as .json"
+          onPress={() => handleExport('json')}
+          right={<Text style={styles.arrow}>›</Text>}
+        />
+        <SettingRow
+          icon="📥"
+          label="Import Bookmarks"
+          description="Import from a JSON file"
+          onPress={handleImport}
+          right={<Text style={styles.arrow}>›</Text>}
+        />
+
         <Text style={[styles.section, { color: subColor }]}>DATA</Text>
+        <SettingRow
+          icon="💾"
+          label="Offline Cache"
+          description={
+            cacheStats.count > 0
+              ? `${cacheStats.count} page${cacheStats.count !== 1 ? 's' : ''} — ${cacheStats.sizeMb} MB`
+              : 'No pages cached'
+          }
+          onPress={cacheStats.count > 0 ? handleClearCache : undefined}
+          right={
+            cacheStats.count > 0 ? (
+              <Pressable onPress={handleClearCache} style={[styles.btn, { backgroundColor: '#ef4444' }]}>
+                <Text style={styles.btnText}>Clear</Text>
+              </Pressable>
+            ) : null
+          }
+        />
         <SettingRow
           icon="🕐"
           label="Clear History"
           description="Remove all browsing history"
           right={
             <Pressable onPress={handleClearHistory} style={styles.btn}>
-              <Text style={styles.btnText}>
-                {historyCleared ? '✓ Cleared' : 'Clear'}
-              </Text>
+              <Text style={styles.btnText}>{historyCleared ? '✓ Cleared' : 'Clear'}</Text>
             </Pressable>
           }
         />
 
         <Text style={[styles.section, { color: subColor }]}>ABOUT</Text>
-        <SettingRow
-          icon="📚"
-          label="DocVault"
-          description="Ultimate documentation browser"
-        />
-        <SettingRow
-          icon="🔢"
-          label="Version"
-          description="1.0.0"
-        />
+        <SettingRow icon="📚" label="DocVault" description="Ultimate documentation browser · v1.1.0" />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
+  header: { paddingHorizontal: 16, paddingBottom: 8 },
   title: { fontSize: 22, fontWeight: '800' },
   section: {
     fontSize: 11,
@@ -135,4 +200,5 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   btnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  arrow: { fontSize: 20, color: '#94a3b8' },
 });

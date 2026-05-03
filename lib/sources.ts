@@ -284,17 +284,30 @@ export const DOC_SOURCES: DocSource[] = [
 
 export const CATEGORIES = [...new Set(DOC_SOURCES.map((s) => s.category))];
 
+// Runtime cache of custom sources (refreshed when Browse screen loads)
+let _customSources: DocSource[] = [];
+export function setCustomSources(sources: DocSource[]): void {
+  _customSources = sources;
+}
+export function getCustomSources(): DocSource[] {
+  return _customSources;
+}
+
+export function getAllSources(): DocSource[] {
+  return [...DOC_SOURCES, ..._customSources];
+}
+
 export function getSourceById(id: string): DocSource | undefined {
-  return DOC_SOURCES.find((s) => s.id === id);
+  return getAllSources().find((s) => s.id === id);
 }
 
 export function getSourcesByCategory(cat: string): DocSource[] {
-  return DOC_SOURCES.filter((s) => s.category === cat);
+  return getAllSources().filter((s) => s.category === cat);
 }
 
 export function searchSources(query: string): DocSource[] {
   const q = query.toLowerCase();
-  return DOC_SOURCES.filter(
+  return getAllSources().filter(
     (s) =>
       s.name.toLowerCase().includes(q) ||
       s.description.toLowerCase().includes(q) ||
