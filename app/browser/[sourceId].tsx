@@ -5,7 +5,6 @@ import {
   Animated,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -50,12 +49,14 @@ const toast = (msg: string) => {
 };
 
 export default function BrowserScreen() {
-  const { sourceId, url: initialUrl } = useLocalSearchParams<{ sourceId: string; url?: string }>();
+  const { sourceId: rawSourceId, url: initialUrl } = useLocalSearchParams<{ sourceId: string; url?: string }>();
+  // useLocalSearchParams can return string[] — always coerce to a single string
+  const sourceId = Array.isArray(rawSourceId) ? (rawSourceId[0] ?? '') : (rawSourceId ?? '');
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   const source = getSourceById(sourceId);
-  const startUrl = initialUrl ?? source?.url ?? 'https://developer.mozilla.org';
+  const startUrl = (Array.isArray(initialUrl) ? initialUrl[0] : initialUrl) ?? source?.url ?? 'https://developer.mozilla.org';
 
   // ── Navigation state ──────────────────────────────────────────────────────
   const [currentUrl, setCurrentUrl] = useState(startUrl);
@@ -162,51 +163,68 @@ export default function BrowserScreen() {
 
   // ── Bookmark toggle ───────────────────────────────────────────────────────
   const handleToggleBookmark = useCallback(async () => {
-    if (bookmarked) {
-      await removeBookmark(currentUrl);
-      setBookmarked(false);
-      toast('Bookmark removed');
-    } else {
-      await addBookmark(currentUrl, pageTitle || currentUrl, sourceId);
-      setBookmarked(true);
-      toast('⭐ Bookmarked');
-      // Auto-cache when bookmarking (if setting enabled)
-      const settings = await getSettings();
-      if (settings.autoCacheBookmarks && cacheStatus === 'none') {
-        setCapturingCache(true);
-        webviewRef.current?.injectJavaScript(CAPTURE_HTML_JS);
+    try {
+      if (bookmarked) {
+        await removeBookmark(currentUrl);
+        setBookmarked(false);
+        toast('Bookmark removed');
+      } else {
+        await addBookmark(currentUrl, pageTitle || currentUrl, sourceId);
+        setBookmarked(true);
+        toast('⭐ Bookmarked');
+        // Auto-cache when bookmarking (if setting enabled)
+        const settings = await getSettings();
+        if (settings.autoCacheBookmarks && cacheStatus === 'none') {
+          setCapturingCache(true);
+          webviewRef.current?.injectJavaScript(CAPTURE_HTML_JS);
+          // Safety timeout — reset if WebView never sends captureHtml message
+          setTimeout(() => setCapturingCache(false), 15000);
+        }
       }
+    } catch (e) {
+      Alert.alert('Bookmark error', String(e));
     }
   }, [bookmarked, currentUrl, pageTitle, sourceId, cacheStatus]);
 
   // ── Cache page ────────────────────────────────────────────────────────────
   const handleCachePage = useCallback(async () => {
     if (capturingCache) return;
-    setCapturingCache(true);
-    webviewRef.current?.injectJavaScript(CAPTURE_HTML_JS);
-    if (!bookmarked) {
-      await addBookmark(currentUrl, pageTitle || currentUrl, sourceId);
-      setBookmarked(true);
+    try {
+      setCapturingCache(true);
+      webviewRef.current?.injectJavaScript(CAPTURE_HTML_JS);
+      // Safety timeout — reset if WebView never sends captureHtml message back
+      setTimeout(() => setCapturingCache(false), 15000);
+      if (!bookmarked) {
+        await addBookmark(currentUrl, pageTitle || currentUrl, sourceId);
+        setBookmarked(true);
+      }
+    } catch (e) {
+      setCapturingCache(false);
+      Alert.alert('Cache error', String(e));
     }
   }, [capturingCache, currentUrl, pageTitle, sourceId, bookmarked]);
 
   // ── Toggle offline mode ───────────────────────────────────────────────────
   const handleToggleOffline = useCallback(async () => {
-    if (offlineMode) {
-      setOfflineMode(false);
-      return;
-    }
-    if (offlineHtml) {
-      setOfflineMode(true);
-      return;
-    }
-    const html = await loadCachedPage(currentUrl);
-    if (html) {
-      setOfflineHtml(html);
-      setOfflineMode(true);
-      toast('📖 Loading offline version');
-    } else {
-      toast('No cached version — tap ☁ to save first');
+    try {
+      if (offlineMode) {
+        setOfflineMode(false);
+        return;
+      }
+      if (offlineHtml) {
+        setOfflineMode(true);
+        return;
+      }
+      const html = await loadCachedPage(currentUrl);
+      if (html) {
+        setOfflineHtml(html);
+        setOfflineMode(true);
+        toast('📖 Loading offline version');
+      } else {
+        toast('No cached version — tap ☁ to save first');
+      }
+    } catch (e) {
+      Alert.alert('Offline error', String(e));
     }
   }, [offlineMode, offlineHtml, currentUrl]);
 
@@ -246,11 +264,15 @@ export default function BrowserScreen() {
     async (format: 'url' | 'markdown' | 'json') => {
       setShowMenu(null);
       const bm = { id: 0, url: currentUrl, title: pageTitle || currentUrl, sourceId, createdAt: Date.now() };
-      if (format === 'url') {
-        await Clipboard.setStringAsync(currentUrl);
-        toast('🔗 URL copied');
-      } else {
-        await shareBookmark(bm, format);
+      try {
+        if (format === 'url') {
+          await Clipboard.setStringAsync(currentUrl);
+          toast('🔗 URL copied');
+        } else {
+          await shareBookmark(bm, format);
+        }
+      } catch (e) {
+        Alert.alert('Share error', String(e));
       }
     },
     [currentUrl, pageTitle, sourceId],
