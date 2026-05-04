@@ -70,6 +70,13 @@ export default function TabsLayout() {
           tabBarIcon: ({ focused }) => <TabIcon icon="⚙️" label="Settings" focused={focused} />,
         }}
       />
+      <Tabs.Screen
+        name="debug"
+        options={{
+          title: 'Debug',
+          tabBarIcon: ({ focused }) => <TabIcon icon="🔧" label="Debug" focused={focused} />,
+        }}
+      />
     </Tabs>
   );
 }

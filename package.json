@@ -17,6 +17,8 @@
     "testEnvironment": "node",
     "moduleNameMapper": {
       "^expo-file-system/legacy$": "<rootDir>/__mocks__/expo-file-system-legacy.js",
+      "^../lib/debugLog$": "<rootDir>/__mocks__/lib/debugLog.js",
+      "^./debugLog$": "<rootDir>/__mocks__/lib/debugLog.js",
       "^@/(.*)$": "<rootDir>/$1"
     },
     "transformIgnorePatterns": [
@@ -38,7 +40,7 @@
     "expo-constants": "~18.0.10",
     "expo-device": "~8.0.9",
     "expo-document-picker": "~14.0.8",
-    "expo-file-system": "^55.0.17",
+    "expo-file-system": "^19.0.22",
     "expo-font": "~14.0.9",
     "expo-glass-effect": "~0.1.6",
     "expo-haptics": "~15.0.7",

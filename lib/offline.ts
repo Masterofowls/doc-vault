@@ -6,9 +6,10 @@
 
 import * as FileSystem from 'expo-file-system/legacy';
 import { updateBookmarkCache } from './database';
+import { debugLog } from './debugLog';
 
 // Guard: documentDirectory can be null in some environments (e.g. before native init)
-const DOC_DIR = FileSystem.documentDirectory ?? 'file:///data/user/0/com.docvault/files/';
+const DOC_DIR = FileSystem.documentDirectory ?? 'file:///data/user/0/com.docvault.app/files/';
 const CACHE_DIR = `${DOC_DIR}offline/`;
 const META_DIR = `${DOC_DIR}offline_meta/`;
 const CACHE_INDEX_PATH = `${DOC_DIR}offline_index.json`;
@@ -31,10 +32,18 @@ const STALE_HOURS = 48; // entries older than this show stale badge
 // ─── Directory helpers ────────────────────────────────────────────────────────
 
 async function ensureDirs(): Promise<void> {
+  debugLog.info('offline', `DOC_DIR=${DOC_DIR}`);
   for (const dir of [CACHE_DIR, META_DIR]) {
-    const info = await FileSystem.getInfoAsync(dir);
-    if (!info.exists) {
-      await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    try {
+      const info = await FileSystem.getInfoAsync(dir);
+      if (!info.exists) {
+        debugLog.info('offline', `Creating dir: ${dir}`);
+        await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+        debugLog.info('offline', `Created dir: ${dir}`);
+      }
+    } catch (e) {
+      debugLog.error('offline', `ensureDirs failed for ${dir}: ${String(e)}`);
+      throw e;
     }
   }
 }
@@ -105,22 +114,30 @@ export async function cachePageHtml(
   title = '',
   sourceId = '',
 ): Promise<string> {
-  await ensureDirs();
-  const path = getCachedPath(url);
-  const metaPath = getMetaPath(url);
+  debugLog.info('cachePageHtml', `Start url=${url} htmlLen=${html.length}`);
+  try {
+    await ensureDirs();
+    const path = getCachedPath(url);
+    const metaPath = getMetaPath(url);
 
-  await FileSystem.writeAsStringAsync(path, html, { encoding: FileSystem.EncodingType.UTF8 });
+    debugLog.info('cachePageHtml', `Writing HTML to ${path}`);
+    await FileSystem.writeAsStringAsync(path, html, { encoding: FileSystem.EncodingType.UTF8 });
 
-  const sizeBytes = new TextEncoder().encode(html).length;
+    const sizeBytes = new TextEncoder().encode(html).length;
 
-  const meta = { url, title, sourceId, cachedAt: Date.now(), sizeBytes };
-  await FileSystem.writeAsStringAsync(metaPath, JSON.stringify(meta), {
-    encoding: FileSystem.EncodingType.UTF8,
-  });
+    const meta = { url, title, sourceId, cachedAt: Date.now(), sizeBytes };
+    await FileSystem.writeAsStringAsync(metaPath, JSON.stringify(meta), {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
 
-  await upsertIndex({ url, title, path, metaPath, cachedAt: meta.cachedAt, sizeBytes, sourceId });
-  await updateBookmarkCache(url, path).catch(() => {});
-  return path;
+    await upsertIndex({ url, title, path, metaPath, cachedAt: meta.cachedAt, sizeBytes, sourceId });
+    await updateBookmarkCache(url, path).catch(() => {});
+    debugLog.info('cachePageHtml', `Success path=${path} size=${sizeBytes}`);
+    return path;
+  } catch (e) {
+    debugLog.error('cachePageHtml', `FAILED url=${url}: ${String(e)}`);
+    throw e;
+  }
 }
 
 /**

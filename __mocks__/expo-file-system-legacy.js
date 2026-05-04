@@ -11,7 +11,7 @@ const EncodingType = {
   Base64: 'base64',
 };
 
-const documentDirectory = 'file:///data/user/0/com.docvault/files/';
+const documentDirectory = 'file:///data/user/0/com.docvault.app/files/';
 
 function normPath(p) {
   return p.startsWith('file://') ? p.slice(7) : p;

@@ -1,8 +1,13 @@
 package com.docvault.app
 import expo.modules.splashscreen.SplashScreenManager
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -12,15 +17,57 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
+
+  companion object {
+    private const val TAG = "DocVault"
+    private const val PERMISSION_REQUEST_CODE = 1001
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
-    // Set the theme to AppTheme BEFORE onCreate to support
-    // coloring the background, status bar, and navigation bar.
-    // This is required for expo-splash-screen.
-    // setTheme(R.style.AppTheme);
-    // @generated begin expo-splashscreen - expo prebuild (DO NOT MODIFY) sync-f3ff59a738c56c9a6119210cb55f0b613eb8b6af
     SplashScreenManager.registerOnActivity(this)
-    // @generated end expo-splashscreen
     super.onCreate(null)
+    requestStoragePermissions()
+  }
+
+  /** Request all relevant storage permissions at startup based on API level. */
+  private fun requestStoragePermissions() {
+    val permsNeeded = buildList {
+      if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+        // Android 12L and below
+        add(Manifest.permission.READ_EXTERNAL_STORAGE)
+      }
+      if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
+        // Android 10 and below
+        add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        // Android 13+
+        add(Manifest.permission.READ_MEDIA_IMAGES)
+        add(Manifest.permission.READ_MEDIA_VIDEO)
+        add(Manifest.permission.READ_MEDIA_AUDIO)
+      }
+    }.filter {
+      ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+    }
+
+    if (permsNeeded.isNotEmpty()) {
+      Log.d(TAG, "Requesting permissions: $permsNeeded")
+      ActivityCompat.requestPermissions(this, permsNeeded.toTypedArray(), PERMISSION_REQUEST_CODE)
+    } else {
+      Log.d(TAG, "All storage permissions already granted")
+    }
+  }
+
+  override fun onRequestPermissionsResult(
+    requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+  ) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    if (requestCode == PERMISSION_REQUEST_CODE) {
+      permissions.forEachIndexed { i, perm ->
+        val status = if (grantResults[i] == PackageManager.PERMISSION_GRANTED) "GRANTED" else "DENIED"
+        Log.d(TAG, "Permission $perm: $status")
+      }
+    }
   }
 
   /**
