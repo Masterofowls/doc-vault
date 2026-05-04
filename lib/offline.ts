@@ -7,9 +7,11 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { updateBookmarkCache } from './database';
 
-const CACHE_DIR = `${FileSystem.documentDirectory}offline/`;
-const META_DIR = `${FileSystem.documentDirectory}offline_meta/`;
-const CACHE_INDEX_PATH = `${FileSystem.documentDirectory}offline_index.json`;
+// Guard: documentDirectory can be null in some environments (e.g. before native init)
+const DOC_DIR = FileSystem.documentDirectory ?? 'file:///data/user/0/com.docvault/files/';
+const CACHE_DIR = `${DOC_DIR}offline/`;
+const META_DIR = `${DOC_DIR}offline_meta/`;
+const CACHE_INDEX_PATH = `${DOC_DIR}offline_index.json`;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

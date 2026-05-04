@@ -1,0 +1,42 @@
+ΓÇ║ Installing 3 SDK 54.0.0 compatible native modules and 1 other package using [1mnpm[22m
+> npm install --save-dev @testing-library/react-native
+npm error code ERESOLVE
+npm error ERESOLVE unable to resolve dependency tree
+npm error
+npm error While resolving: bna-app@1.0.0
+npm error Found: react@19.1.0
+npm error node_modules/react
+npm error   react@"19.1.0" from the root project
+npm error   peer react@">=18.2.0" from @testing-library/react-native@13.3.3
+npm error   node_modules/@testing-library/react-native
+npm error     dev @testing-library/react-native@"*" from the root project
+npm error   1 more (react-native)
+npm error
+npm error Could not resolve dependency:
+npm error peer react@"^19.2.5" from react-test-renderer@19.2.5
+npm error node_modules/react-test-renderer
+npm error   peer react-test-renderer@">=18.2.0" from @testing-library/react-native@13.3.3
+npm error   node_modules/@testing-library/react-native
+npm error     dev @testing-library/react-native@"*" from the root project
+npm error
+npm error Fix the upstream dependency conflict, or retry
+npm error this command with --force or --legacy-peer-deps
+npm error to accept an incorrect (and potentially broken) dependency resolution.
+npm error
+npm error
+npm error For a full report see:
+npm error C:\Users\mrdan\AppData\Local\npm-cache\_logs\2026-05-04T01_38_36_766Z-eresolve-report.txt
+npm error A complete log of this run can be found in: C:\Users\mrdan\AppData\Local\npm-cache\_logs\2026-05-04T01_38_36_766Z-debug-0.log
+Error: npm install --save-dev @testing-library/react-native exited with non-zero code: 1
+Error: npm install --save-dev @testing-library/react-native exited with non-zero code: 1
+    at ChildProcess.completionListener (C:\Powershell\doc-vault\bna-app\node_modules\@expo\spawn-async\build\spawnAsync.js:42:23)
+    at Object.onceWrapper (node:events:634:26)
+    at ChildProcess.emit (node:events:519:28)
+    at cp.emit (C:\Powershell\doc-vault\bna-app\node_modules\cross-spawn\lib\enoent.js:34:29)
+    at maybeClose (node:internal/child_process:1101:16)
+    at ChildProcess._handle.onexit (node:internal/child_process:304:5)
+    ...
+    at spawnAsync (C:\Powershell\doc-vault\bna-app\node_modules\@expo\spawn-async\build\spawnAsync.js:7:23)
+    at NpmPackageManager.runAsync (C:\Powershell\doc-vault\bna-app\node_modules\@expo\package-manager\build\node\BasePackageManager.js:41:42)
+    at C:\Powershell\doc-vault\bna-app\node_modules\@expo\package-manager\build\node\NpmPackageManager.js:46:20
+    at C:\Powershell\doc-vault\bna-app\node_modules\@expo\package-manager\build\utils\spawn.js:14:34

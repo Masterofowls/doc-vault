@@ -161,18 +161,26 @@ export default function BrowserScreen() {
           htmlChunks.current[data.index as number] = data.data as string;
 
         } else if (data.type === 'captureDone') {
-          setCapturingCache(false);
           const html = htmlChunks.current.join('');
           const title = captureTitle.current || pageTitle;
           htmlChunks.current = [];
-          await cachePageHtml(currentUrl, html, title, sourceId);
-          setOfflineHtml(html);
-          setCacheStatus('fresh');
-          toast('📥 Page cached for offline use');
+          expectedChunks.current = 0;
+          try {
+            await cachePageHtml(currentUrl, html, title, sourceId);
+            setOfflineHtml(html);
+            setCacheStatus('fresh');
+            toast('📥 Page cached for offline use');
+          } catch (cacheErr) {
+            console.error('[DocVault Cache] cachePageHtml failed:', cacheErr);
+            Alert.alert('Cache error', `Failed to save page: ${String(cacheErr)}`);
+          } finally {
+            setCapturingCache(false);
+          }
 
         } else if (data.type === 'captureError') {
           setCapturingCache(false);
           htmlChunks.current = [];
+          expectedChunks.current = 0;
           Alert.alert('Cache error', String(data.error));
 
         } else if (data.type === 'scrollProgress') {
@@ -181,7 +189,11 @@ export default function BrowserScreen() {
         } else if (data.type === 'pageMeta') {
           if (data.title && !pageTitle) setPageTitle(data.title as string);
         }
-      } catch {}
+      } catch (e) {
+        console.error('[DocVault Cache] handleMessage error:', e);
+        setCapturingCache(false);
+        Alert.alert('Cache error', String(e));
+      }
     },
     [currentUrl, pageTitle, sourceId],
   );
