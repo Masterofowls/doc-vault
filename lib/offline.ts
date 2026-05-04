@@ -230,17 +230,32 @@ export async function clearAllCache(): Promise<void> {
 
 // ─── WebView injection helpers ───────────────────────────────────────────────
 
-/** Inject into WebView to capture full page HTML and send via postMessage */
+/**
+ * Inject into WebView to capture full page HTML via chunked postMessage.
+ * Large pages (MDN, Next.js docs etc.) can be 2-5 MB of HTML — sending them
+ * in one postMessage causes a silent failure on Android.  We split into 200 KB
+ * chunks so every message stays well under the bridge limit.
+ */
 export const CAPTURE_HTML_JS = `
 (function() {
   try {
-    const html = document.documentElement.outerHTML;
-    const title = document.title || '';
-    window.ReactNativeWebView.postMessage(JSON.stringify({
-      type: 'captureHtml', html, title,
-    }));
-  } catch(e) {}
+    if (!window.ReactNativeWebView) return;
+    var html = document.documentElement.outerHTML;
+    var title = document.title || '';
+    var CHUNK = 200 * 1024; // 200 KB per message
+    var total = Math.max(1, Math.ceil(html.length / CHUNK));
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'captureStart', title: title, chunks: total }));
+    for (var i = 0; i < total; i++) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'captureChunk', index: i, data: html.slice(i * CHUNK, (i + 1) * CHUNK)
+      }));
+    }
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'captureDone' }));
+  } catch(e) {
+    try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'captureError', error: String(e) })); } catch(_) {}
+  }
 })();
+true;
 `;
 
 /** Inject to measure page scroll progress and send updates */

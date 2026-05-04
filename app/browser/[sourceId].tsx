@@ -72,9 +72,15 @@ export default function BrowserScreen() {
   // ── Bookmark & cache state ────────────────────────────────────────────────
   const [bookmarked, setBookmarked] = useState(false);
   const [cacheStatus, setCacheStatus] = useState<'fresh' | 'stale' | 'none'>('none');
-  const [offlineMode, setOfflineMode] = useState(false);
+  const [offlineMode, setOfflineMode] = useState(false);        // single-page offline view
+  const [globalOfflineMode, setGlobalOfflineMode] = useState(false); // all-pages offline mode
   const [offlineHtml, setOfflineHtml] = useState<string | null>(null);
   const [capturingCache, setCapturingCache] = useState(false);
+
+  // Chunk assembly refs — reused across chunks for a single capture session
+  const htmlChunks = useRef<string[]>([]);
+  const expectedChunks = useRef<number>(0);
+  const captureTitle = useRef<string>('');
 
   // ── Reading / display state ───────────────────────────────────────────────
   const [readingMode, setReadingMode] = useState(false);
@@ -144,17 +150,36 @@ export default function BrowserScreen() {
     async (event: WebViewMessageEvent) => {
       try {
         const data = JSON.parse(event.nativeEvent.data);
-        if (data.type === 'captureHtml') {
+
+        if (data.type === 'captureStart') {
+          // Reset chunk buffer for new capture
+          htmlChunks.current = new Array(data.chunks as number);
+          expectedChunks.current = data.chunks as number;
+          captureTitle.current = (data.title as string) || pageTitle;
+
+        } else if (data.type === 'captureChunk') {
+          htmlChunks.current[data.index as number] = data.data as string;
+
+        } else if (data.type === 'captureDone') {
           setCapturingCache(false);
-          const title = data.title || pageTitle;
-          await cachePageHtml(currentUrl, data.html, title, sourceId);
-          setOfflineHtml(data.html);
+          const html = htmlChunks.current.join('');
+          const title = captureTitle.current || pageTitle;
+          htmlChunks.current = [];
+          await cachePageHtml(currentUrl, html, title, sourceId);
+          setOfflineHtml(html);
           setCacheStatus('fresh');
           toast('📥 Page cached for offline use');
+
+        } else if (data.type === 'captureError') {
+          setCapturingCache(false);
+          htmlChunks.current = [];
+          Alert.alert('Cache error', String(data.error));
+
         } else if (data.type === 'scrollProgress') {
           setScrollProgress(data.pct as number);
+
         } else if (data.type === 'pageMeta') {
-          if (data.title && !pageTitle) setPageTitle(data.title);
+          if (data.title && !pageTitle) setPageTitle(data.title as string);
         }
       } catch {}
     },
@@ -228,7 +253,44 @@ export default function BrowserScreen() {
     }
   }, [offlineMode, offlineHtml, currentUrl]);
 
-  // ── Reading mode toggle ───────────────────────────────────────────────────
+  // ── Toggle global offline mode ────────────────────────────────────────────
+  const handleToggleGlobalOffline = useCallback(async () => {
+    const next = !globalOfflineMode;
+    setGlobalOfflineMode(next);
+    if (next) {
+      // Immediately try to serve current page from cache
+      const html = await loadCachedPage(currentUrl);
+      if (html) {
+        setOfflineHtml(html);
+        setOfflineMode(true);
+        toast('📡 Offline mode ON — serving cached page');
+      } else {
+        toast('📡 Offline mode ON — no cache for current page');
+      }
+    } else {
+      setOfflineMode(false);
+      toast('🌐 Online mode');
+    }
+  }, [globalOfflineMode, currentUrl]);
+
+  // When global offline mode is on, intercept URL changes and serve cache
+  useEffect(() => {
+    if (!globalOfflineMode || !currentUrl) return;
+    let cancelled = false;
+    loadCachedPage(currentUrl).then(html => {
+      if (cancelled) return;
+      if (html) {
+        setOfflineHtml(html);
+        setOfflineMode(true);
+      } else {
+        setOfflineMode(false);
+        setOfflineHtml(null);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [currentUrl, globalOfflineMode]);
+
+
   const handleToggleReadingMode = useCallback(() => {
     webviewRef.current?.injectJavaScript(buildReadingModeToggle());
     setReadingMode(prev => !prev);
@@ -386,6 +448,14 @@ export default function BrowserScreen() {
             },
           ]}
         />
+      )}
+
+      {/* ── Global offline mode banner ── */}
+      {globalOfflineMode && (
+        <View style={[styles.offlineBanner, { backgroundColor: tintColor }]}>
+          <Ionicons name="wifi-outline" size={13} color="#fff" />
+          <Text style={styles.offlineBannerText}>Offline Mode</Text>
+        </View>
       )}
 
       {/* ── Scroll progress strip ── */}
@@ -548,12 +618,12 @@ export default function BrowserScreen() {
           )}
         </TouchableOpacity>
 
-        {/* 📖 Reading mode */}
+        {/* 📡 Global offline mode toggle */}
         <ToolBtn
-          icon={readingMode ? 'book' : 'book-outline'}
+          icon={globalOfflineMode ? 'wifi' : 'wifi-outline'}
           size={22}
-          color={readingMode ? tintColor : textColor}
-          onPress={handleToggleReadingMode}
+          color={globalOfflineMode ? tintColor : textColor}
+          onPress={handleToggleGlobalOffline}
         />
 
         {/* ⋯ Menu */}
@@ -670,6 +740,19 @@ const styles = StyleSheet.create({
   },
   scrollFill: {
     height: 2,
+  },
+
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 3,
+  },
+  offlineBannerText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#fff',
   },
 
   webview: { flex: 1 },

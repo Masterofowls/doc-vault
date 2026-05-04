@@ -57,6 +57,13 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="cached"
+        options={{
+          title: 'Cached',
+          tabBarIcon: ({ focused }) => <TabIcon icon="📥" label="Cached" focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: 'Settings',
