@@ -335,7 +335,7 @@ export default function BrowseScreen() {
         onRequestClose={() => setAddModalVisible(false)}
       >
         <View style={[styles.modal, { backgroundColor: bg }]}>
-          <View style={[styles.modalHeader, { borderBottomColor: borderColor }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: borderColor, paddingTop: insets.top + 16 }]}>
             <TouchableOpacity onPress={() => setAddModalVisible(false)}>
               <Text style={{ color: '#ef4444', fontSize: 16 }}>Cancel</Text>
             </TouchableOpacity>
@@ -481,7 +481,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   modalTitle: { fontSize: 17, fontWeight: '600' },

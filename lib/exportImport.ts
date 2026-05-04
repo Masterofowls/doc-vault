@@ -1,6 +1,6 @@
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Bookmark, getAllBookmarks, addBookmark } from './database';
 
 function formatDate(ts: number): string {

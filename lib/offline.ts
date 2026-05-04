@@ -4,7 +4,7 @@
  * Supports cache index, freshness checks, and background pre-cache.
  */
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { updateBookmarkCache } from './database';
 
 const CACHE_DIR = `${FileSystem.documentDirectory}offline/`;

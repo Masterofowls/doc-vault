@@ -13,7 +13,10 @@
       "resizeMode": "contain",
       "backgroundColor": "#0f172a"
     },
-    "ios": { "supportsTablet": true, "bundleIdentifier": "com.docvault.app" },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.docvault.app"
+    },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
@@ -21,13 +24,27 @@
       },
       "package": "com.docvault.app",
       "edgeToEdgeEnabled": true,
-      "permissions": ["android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE"]
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ]
     },
     "plugins": [
       "expo-router",
       "expo-sqlite",
-      ["expo-document-picker", { "iCloudContainerEnvironment": "Production" }]
+      [
+        "expo-document-picker",
+        {
+          "iCloudContainerEnvironment": "Production"
+        }
+      ],
+      "expo-sharing",
+      "expo-secure-store"
     ],
-    "web": { "bundler": "metro", "output": "static", "favicon": "./assets/images/favicon.png" }
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    }
   }
 }
